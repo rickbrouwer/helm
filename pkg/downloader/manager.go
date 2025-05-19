@@ -510,35 +510,41 @@ func (m *Manager) ensureMissingRepos(repoNames map[string]string, deps []*chart.
 			continue
 		}
 
-		// When the repoName for a dependency is known we can skip ensuring
-		if _, ok := repoNames[dd.Name]; ok {
-			continue
-		}
+		// Create a unique key for this dependency using the index
+		for i, d := range deps {
+			if d.Name == dd.Name && d.Repository == dd.Repository {
+				depKey := fmt.Sprintf("%s-%d", dd.Name, i)
+				// When the repoName for a dependency is known we can skip ensuring
+				if _, ok := repoNames[depKey]; ok {
+					continue
+				}
 
-		// The generated repository name, which will result in an index being
-		// locally cached, has a name pattern of "helm-manager-" followed by a
-		// sha256 of the repo name. This assumes end users will never create
-		// repositories with these names pointing to other repositories. Using
-		// this method of naming allows the existing repository pulling and
-		// resolution code to do most of the work.
-		rn, err := key(dd.Repository)
-		if err != nil {
-			return repoNames, err
-		}
-		rn = managerKeyPrefix + rn
+				// The generated repository name, which will result in an index being
+				// locally cached, has a name pattern of "helm-manager-" followed by a
+				// sha256 of the repo name. This assumes end users will never create
+				// repositories with these names pointing to other repositories. Using
+				// this method of naming allows the existing repository pulling and
+				// resolution code to do most of the work.
+				rn, err := key(dd.Repository)
+				if err != nil {
+					return repoNames, err
+				}
+				rn = managerKeyPrefix + rn
 
-		repoNames[dd.Name] = rn
+				repoNames[depKey] = rn
 
-		// Assuming the repository is generally available. For Helm managed
-		// access controls the repository needs to be added through the user
-		// managed system. This path will work for public charts, like those
-		// supplied by Bitnami, but not for protected charts, like corp ones
-		// behind a username and pass.
-		ri := &repo.Entry{
-			Name: rn,
-			URL:  dd.Repository,
+				// Assuming the repository is generally available. For Helm managed
+				// access controls the repository needs to be added through the user
+				// managed system. This path will work for public charts, like those
+				// supplied by Bitnami, but not for protected charts, like corp ones
+				// behind a username and pass.
+				ri := &repo.Entry{
+					Name: rn,
+					URL:  dd.Repository,
+				}
+				ru = append(ru, ri)
+			}
 		}
-		ru = append(ru, ri)
 	}
 
 	// Calls to UpdateRepositories (a public function) will only update
@@ -567,16 +573,22 @@ func (m *Manager) resolveRepoNames(deps []*chart.Dependency) (map[string]string,
 	}
 	repos := rf.Repositories
 
+	// Use a map that includes dependency index to make unique keys
+	// for dependencies with the same name
 	reposMap := make(map[string]string)
 
 	// Verify that all repositories referenced in the deps are actually known
 	// by Helm.
 	missing := []string{}
-	for _, dd := range deps {
+	for i, dd := range deps {
 		// Don't map the repository, we don't need to download chart from charts directory
 		if dd.Repository == "" {
 			continue
 		}
+
+		// Create a unique key using both name and index
+		depKey := fmt.Sprintf("%s-%d", dd.Name, i)
+
 		// if dep chart is from local path, verify the path is valid
 		if strings.HasPrefix(dd.Repository, "file://") {
 			if _, err := resolver.GetLocalPath(dd.Repository, m.ChartPath); err != nil {
@@ -586,12 +598,12 @@ func (m *Manager) resolveRepoNames(deps []*chart.Dependency) (map[string]string,
 			if m.Debug {
 				fmt.Fprintf(m.Out, "Repository from local path: %s\n", dd.Repository)
 			}
-			reposMap[dd.Name] = dd.Repository
+			reposMap[depKey] = dd.Repository
 			continue
 		}
 
 		if registry.IsOCI(dd.Repository) {
-			reposMap[dd.Name] = dd.Repository
+			reposMap[depKey] = dd.Repository
 			continue
 		}
 
@@ -602,11 +614,11 @@ func (m *Manager) resolveRepoNames(deps []*chart.Dependency) (map[string]string,
 				(strings.HasPrefix(dd.Repository, "alias:") && strings.TrimPrefix(dd.Repository, "alias:") == repo.Name) {
 				found = true
 				dd.Repository = repo.URL
-				reposMap[dd.Name] = repo.Name
+				reposMap[depKey] = repo.Name
 				break
 			} else if urlutil.Equal(repo.URL, dd.Repository) {
 				found = true
-				reposMap[dd.Name] = repo.Name
+				reposMap[depKey] = repo.Name
 				break
 			}
 		}
@@ -615,7 +627,7 @@ func (m *Manager) resolveRepoNames(deps []*chart.Dependency) (map[string]string,
 			// Add if URL
 			_, err := url.ParseRequestURI(repository)
 			if err == nil {
-				reposMap[repository] = repository
+				reposMap[depKey] = repository
 				continue
 			}
 			missing = append(missing, repository)

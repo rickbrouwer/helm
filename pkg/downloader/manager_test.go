@@ -154,7 +154,7 @@ func TestGetRepoNames(t *testing.T) {
 			req: []*chart.Dependency{
 				{Name: "oedipus-rex", Repository: "http://example.com/test"},
 			},
-			expect: map[string]string{"http://example.com/test": "http://example.com/test"},
+			expect: map[string]string{"oedipus-rex-0": "http://example.com/test"},
 		},
 		{
 			name: "no repo definition failure -- stable repo",
@@ -168,28 +168,28 @@ func TestGetRepoNames(t *testing.T) {
 			req: []*chart.Dependency{
 				{Name: "oedipus-rex", Repository: "http://example.com"},
 			},
-			expect: map[string]string{"oedipus-rex": "testing"},
+			expect: map[string]string{"oedipus-rex-0": "testing"},
 		},
 		{
 			name: "repo from local path",
 			req: []*chart.Dependency{
 				{Name: "local-dep", Repository: "file://./testdata/signtest"},
 			},
-			expect: map[string]string{"local-dep": "file://./testdata/signtest"},
+			expect: map[string]string{"local-dep-0": "file://./testdata/signtest"},
 		},
 		{
 			name: "repo alias (alias:)",
 			req: []*chart.Dependency{
 				{Name: "oedipus-rex", Repository: "alias:testing"},
 			},
-			expect: map[string]string{"oedipus-rex": "testing"},
+			expect: map[string]string{"oedipus-rex-0": "testing"},
 		},
 		{
 			name: "repo alias (@)",
 			req: []*chart.Dependency{
 				{Name: "oedipus-rex", Repository: "@testing"},
 			},
-			expect: map[string]string{"oedipus-rex": "testing"},
+			expect: map[string]string{"oedipus-rex-0": "testing"},
 		},
 		{
 			name: "repo from local chart under charts path",
@@ -216,7 +216,7 @@ func TestGetRepoNames(t *testing.T) {
 		// m1 and m2 are the maps we want to compare
 		eq := reflect.DeepEqual(l, tt.expect)
 		if !eq {
-			t.Errorf("%s: expected map %v, got %v", tt.name, l, tt.name)
+			t.Errorf("%s: expected map %v, got %s", tt.name, tt.expect, tt.name)
 		}
 	}
 }
@@ -664,5 +664,54 @@ func TestDedupeRepos(t *testing.T) {
 			got := dedupeRepos(tt.repos)
 			assert.ElementsMatch(t, tt.want, got)
 		})
+	}
+}
+
+func TestResolveRepoNames_WithMultipleSameNameDeps(t *testing.T) {
+	b := bytes.NewBuffer(nil)
+	m := &Manager{
+		Out:              b,
+		RepositoryConfig: repoConfig,
+		RepositoryCache:  repoCache,
+	}
+
+	// Test with mulitple dependencies with the same name but with other repositories
+	req := []*chart.Dependency{
+		{Name: "same-name", Repository: "http://example.com/test1"},
+		{Name: "same-name", Repository: "http://example.com/test2"},
+		{Name: "same-name", Repository: "http://example.com/test3"},
+	}
+
+	repoNames, err := m.resolveRepoNames(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Check that all repositories are assigned correctly
+	// There should be 3 different entries in repoNames
+	if len(repoNames) != 3 {
+		t.Errorf("Expected 3 entries in repoNames, got %d", len(repoNames))
+	}
+
+	// Check if the keys are formed correctly (name-index)
+	expectedKeys := []string{"same-name-0", "same-name-1", "same-name-2"}
+	for _, key := range expectedKeys {
+		if _, exists := repoNames[key]; !exists {
+			t.Errorf("Expected key %q to exist in repoNames", key)
+		}
+	}
+
+	// Check that the values ​​are assigned correctly
+	expectedValues := []string{
+		"http://example.com/test1",
+		"http://example.com/test2",
+		"http://example.com/test3",
+	}
+
+	for i, key := range expectedKeys {
+		if repoNames[key] != expectedValues[i] {
+			t.Errorf("For key %q, expected repo %q, got %q",
+				key, expectedValues[i], repoNames[key])
+		}
 	}
 }

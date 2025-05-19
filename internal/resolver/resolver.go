@@ -107,7 +107,10 @@ func (r *Resolver) Resolve(reqs []*chart.Dependency, repoNames map[string]string
 			continue
 		}
 
-		repoName := repoNames[d.Name]
+		// Generate a unique key for this dependency using the index
+		depKey := fmt.Sprintf("%s-%d", d.Name, i)
+
+		repoName := repoNames[depKey]
 		// if the repository was not defined, but the dependency defines a repository url, bypass the cache
 		if repoName == "" && d.Repository != "" {
 			locked[i] = &chart.Dependency{
